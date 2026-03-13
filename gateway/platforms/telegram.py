@@ -171,6 +171,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     BotCommand("usage", "Show token usage for this session"),
                     BotCommand("provider", "Show available providers"),
                     BotCommand("insights", "Show usage insights and analytics"),
+                    BotCommand("graph", "Generate interactive context graph"),
                     BotCommand("update", "Update Hermes to the latest version"),
                     BotCommand("reload_mcp", "Reload MCP servers from config"),
                     BotCommand("help", "Show available commands"),

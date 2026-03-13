@@ -1336,6 +1336,8 @@ class HermesCLI:
             return "Processing skills command..."
         if cmd_lower == "/reload-mcp":
             return "Reloading MCP servers..."
+        if cmd_lower.startswith("/graph"):
+            return "Generating context graph..."
         return "Processing command..."
 
     def _command_spinner_frame(self) -> str:
@@ -2854,6 +2856,9 @@ class HermesCLI:
             self._show_usage()
         elif cmd_lower.startswith("/insights"):
             self._show_insights(cmd_original)
+        elif cmd_lower.startswith("/graph"):
+            with self._busy_command(self._slow_command_status(cmd_original)):
+                self._show_graph(cmd_original)
         elif cmd_lower == "/paste":
             self._handle_paste_command()
         elif cmd_lower == "/reload-mcp":
@@ -3185,6 +3190,47 @@ class HermesCLI:
             db.close()
         except Exception as e:
             print(f"  Error generating insights: {e}")
+
+    def _show_graph(self, command: str = "/graph"):
+        """Generate interactive context graph HTML from session history."""
+        parts = command.split()
+        days = 30
+        source = None
+        output = None
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--days" and i + 1 < len(parts):
+                try:
+                    days = int(parts[i + 1])
+                except ValueError:
+                    print(f"  Invalid --days value: {parts[i + 1]}")
+                    return
+                i += 2
+            elif parts[i] == "--source" and i + 1 < len(parts):
+                source = parts[i + 1]
+                i += 2
+            elif parts[i] == "--out" and i + 1 < len(parts):
+                output = parts[i + 1]
+                i += 2
+            elif parts[i].isdigit():
+                days = int(parts[i])
+                i += 1
+            else:
+                i += 1
+
+        try:
+            from hermes_state import SessionDB
+            from agent.context_graph import ContextGraphEngine
+
+            db = SessionDB()
+            engine = ContextGraphEngine(db)
+            graph = engine.generate(days=days, source=source)
+            html_path = engine.export_html(graph, output_path=output)
+            print(engine.format_summary(graph, html_path))
+            print("  Open in browser: file://" + str(html_path))
+            db.close()
+        except Exception as e:
+            print(f"  Error generating context graph: {e}")
 
     def _reload_mcp(self):
         """Reload MCP servers: disconnect all, re-read config.yaml, reconnect.

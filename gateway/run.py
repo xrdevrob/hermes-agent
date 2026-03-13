@@ -805,7 +805,7 @@ class GatewayRunner:
         # Emit command:* hook for any recognized slash command
         _known_commands = {"new", "reset", "help", "status", "stop", "model",
                           "personality", "retry", "undo", "sethome", "set-home",
-                          "compress", "usage", "insights", "reload-mcp", "reload_mcp",
+                          "compress", "usage", "insights", "graph", "reload-mcp", "reload_mcp",
                           "update", "title", "resume", "provider", "rollback",
                           "background"}
         if command and command in _known_commands:
@@ -854,6 +854,9 @@ class GatewayRunner:
 
         if command == "insights":
             return await self._handle_insights_command(event)
+
+        if command == "graph":
+            return await self._handle_graph_command(event)
 
         if command in ("reload-mcp", "reload_mcp"):
             return await self._handle_reload_mcp_command(event)
@@ -1503,6 +1506,7 @@ class GatewayRunner:
             "`/resume [name]` — Resume a previously-named session",
             "`/usage` — Show token usage for this session",
             "`/insights [days]` — Show usage insights and analytics",
+            "`/graph [days]` — Generate interactive context graph HTML",
             "`/rollback [number]` — List or restore filesystem checkpoints",
             "`/background <prompt>` — Run a prompt in a separate background session",
             "`/reload-mcp` — Reload MCP servers from config",
@@ -2387,6 +2391,53 @@ class GatewayRunner:
             logger.error("Insights command error: %s", e, exc_info=True)
             return f"Error generating insights: {e}"
 
+    async def _handle_graph_command(self, event: MessageEvent) -> str:
+        """Handle /graph command -- generate an interactive context graph HTML file."""
+        import asyncio as _asyncio
+
+        args = event.get_command_args().strip()
+        days = 30
+        source = None
+
+        if args:
+            parts = args.split()
+            i = 0
+            while i < len(parts):
+                if parts[i] == "--days" and i + 1 < len(parts):
+                    try:
+                        days = int(parts[i + 1])
+                    except ValueError:
+                        return f"Invalid --days value: {parts[i + 1]}"
+                    i += 2
+                elif parts[i] == "--source" and i + 1 < len(parts):
+                    source = parts[i + 1]
+                    i += 2
+                elif parts[i].isdigit():
+                    days = int(parts[i])
+                    i += 1
+                else:
+                    i += 1
+
+        try:
+            from hermes_state import SessionDB
+            from agent.context_graph import ContextGraphEngine
+
+            loop = _asyncio.get_event_loop()
+
+            def _run_graph() -> str:
+                db = SessionDB()
+                engine = ContextGraphEngine(db)
+                graph = engine.generate(days=days, source=source)
+                html_path = engine.export_html(graph)
+                summary = engine.format_summary(graph, html_path)
+                db.close()
+                return summary + f"\nMEDIA:{html_path}"
+
+            return await loop.run_in_executor(None, _run_graph)
+        except Exception as e:
+            logger.error("Graph command error: %s", e, exc_info=True)
+            return f"Error generating graph: {e}"
+
     async def _handle_reload_mcp_command(self, event: MessageEvent) -> str:
         """Handle /reload-mcp command -- disconnect and reconnect all MCP servers."""
         loop = asyncio.get_event_loop()
@@ -2678,8 +2729,8 @@ class GatewayRunner:
                     if "OPENAI_API_KEY" in error or "VOICE_TOOLS_OPENAI_KEY" in error:
                         enriched_parts.append(
                             "[The user sent a voice message but I can't listen "
-                            "to it right now~ VOICE_TOOLS_OPENAI_KEY isn't set up yet "
-                            "(';w;') Let them know!]"
+                            "to it right now~ VOICE_TOOLS_OPENAI_KEY (or OPENAI_API_KEY) "
+                            "isn't set up yet (';w;') Let them know!]"
                         )
                     else:
                         enriched_parts.append(

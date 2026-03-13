@@ -691,6 +691,17 @@ class DiscordAdapter(BasePlatformAdapter):
             except Exception as e:
                 logger.debug("Discord followup failed: %s", e)
 
+        @tree.command(name="graph", description="Generate interactive context graph")
+        @discord.app_commands.describe(days="Number of days to include (default: 30)")
+        async def slash_graph(interaction: discord.Interaction, days: int = 30):
+            await interaction.response.defer(ephemeral=True)
+            event = self._build_slash_event(interaction, f"/graph {days}")
+            await self.handle_message(event)
+            try:
+                await interaction.followup.send("Done~", ephemeral=True)
+            except Exception as e:
+                logger.debug("Discord followup failed: %s", e)
+
         @tree.command(name="reload-mcp", description="Reload MCP servers from config")
         async def slash_reload_mcp(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True)

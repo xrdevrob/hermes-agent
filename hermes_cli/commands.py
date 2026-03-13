@@ -48,6 +48,7 @@ COMMANDS_BY_CATEGORY = {
         "/help": "Show this help message",
         "/usage": "Show token usage for the current session",
         "/insights": "Show usage insights and analytics (last 30 days)",
+        "/graph": "Generate interactive context graph from session history",
         "/platforms": "Show gateway/messaging platform status",
         "/paste": "Check clipboard for an image and attach it",
     },
