@@ -50,8 +50,8 @@ class ContextGraphEngine:
         days: int = 30,
         source: str | None = None,
         max_sessions: int = 120,
-        topics_per_session: int = 8,
-        max_topic_edges: int = 200,
+        topics_per_session: int = 6,
+        max_topic_edges: int = 120,
     ) -> GraphBuildResult:
         cutoff = time.time() - (days * 86400)
         sessions = self._get_sessions(cutoff=cutoff, source=source, limit=max_sessions)
@@ -112,52 +112,66 @@ class ContextGraphEngine:
                     a, b = sorted((top_terms[i], top_terms[j]))
                     topic_pair_weights[(a, b)] += 1
 
-        # Topic nodes
-        for topic, session_hits in global_topic_counts.most_common(120):
+        # Topic nodes (cap for readability)
+        for topic, session_hits in global_topic_counts.most_common(90):
             nodes.append({
                 "id": f"topic:{topic}",
                 "label": topic,
                 "type": "topic",
-                "size": min(14 + session_hits * 2, 30),
+                "size": min(14 + session_hits * 2, 28),
                 "hits": session_hits,
             })
 
-        # Tool nodes
-        for tool_name, calls in session_tool_totals.most_common(80):
+        # Tool nodes (cap for readability)
+        for tool_name, calls in session_tool_totals.most_common(50):
             nodes.append({
                 "id": f"tool:{tool_name}",
                 "label": tool_name,
                 "type": "tool",
-                "size": min(14 + calls, 30),
+                "size": min(14 + calls, 28),
                 "calls": calls,
             })
 
+        node_ids = {n["id"] for n in nodes}
+
         # Session -> topic edges
         for (sid, term), weight in topic_session_weight.items():
+            src = f"session:{sid}"
+            dst = f"topic:{term}"
+            if src not in node_ids or dst not in node_ids:
+                continue
             edges.append({
-                "from": f"session:{sid}",
-                "to": f"topic:{term}",
+                "from": src,
+                "to": dst,
                 "type": "discusses",
                 "weight": min(8, max(1, weight)),
             })
 
         # Session -> tool edges
         for (sid, tool_name), weight in tool_session_weight.items():
+            src = f"session:{sid}"
+            dst = f"tool:{tool_name}"
+            if src not in node_ids or dst not in node_ids:
+                continue
             edges.append({
-                "from": f"session:{sid}",
-                "to": f"tool:{tool_name}",
+                "from": src,
+                "to": dst,
                 "type": "uses",
                 "weight": min(10, max(1, weight)),
             })
 
-        # Topic <-> topic edges (limit for readability)
+        # Topic <-> topic edges (limit and weight threshold for readability)
         pair_items = sorted(topic_pair_weights.items(), key=lambda x: x[1], reverse=True)[:max_topic_edges]
         for (a, b), weight in pair_items:
-            if weight <= 0:
+            if weight < 2:
+                continue
+            src = f"topic:{a}"
+            dst = f"topic:{b}"
+            if src not in node_ids or dst not in node_ids:
                 continue
             edges.append({
-                "from": f"topic:{a}",
-                "to": f"topic:{b}",
+                "from": src,
+                "to": dst,
                 "type": "related",
                 "weight": min(8, max(1, weight)),
             })
@@ -317,13 +331,23 @@ class ContextGraphEngine:
       let color = '#5b8def';
       if (n.type === 'topic') color = '#8b5cf6';
       if (n.type === 'tool') color = '#22c55e';
+
+      const isBig = (n.size || 0) >= 20;
+      const showLabel = n.type === 'session' || isBig;
+      const label = showLabel ? n.label : '';
+      const title = `<b>${n.label}</b><br/>type: ${n.type}<br/>` +
+        Object.entries(n)
+          .filter(([k]) => !['id', 'label', 'type', 'size'].includes(k))
+          .map(([k,v]) => `${k}: ${v}`)
+          .join('<br/>');
+
       return {
         id: n.id,
-        label: n.label,
+        label,
         value: n.size || 10,
-        title: JSON.stringify(n, null, 2),
+        title,
         color: { background: color, border: '#dbe4ff' },
-        font: { color: '#f8fbff' },
+        font: { color: '#f8fbff', size: 12, strokeWidth: 0 },
       };
     }));
 
@@ -340,10 +364,40 @@ class ContextGraphEngine:
       document.getElementById('graph'),
       { nodes, edges },
       {
-        interaction: { hover: true, navigationButtons: true, keyboard: true },
-        nodes: { shape: 'dot', scaling: { min: 8, max: 36 } },
-        edges: { width: 1, selectionWidth: 2, scaling: { min: 1, max: 6 } },
-        physics: { stabilization: false, barnesHut: { gravitationalConstant: -25000 } },
+        layout: { randomSeed: 7, improvedLayout: true },
+        interaction: {
+          hover: true,
+          navigationButtons: true,
+          keyboard: true,
+          tooltipDelay: 120,
+          hideEdgesOnDrag: true,
+        },
+        nodes: {
+          shape: 'dot',
+          scaling: { min: 8, max: 34 },
+          margin: 8,
+        },
+        edges: {
+          width: 1,
+          selectionWidth: 2,
+          scaling: { min: 1, max: 5 },
+          smooth: { enabled: true, type: 'dynamic' },
+          opacity: 0.65,
+        },
+        physics: {
+          enabled: true,
+          solver: 'forceAtlas2Based',
+          stabilization: { enabled: true, iterations: 1400, fit: true },
+          forceAtlas2Based: {
+            gravitationalConstant: -85,
+            centralGravity: 0.018,
+            springLength: 145,
+            springConstant: 0.055,
+            damping: 0.52,
+            avoidOverlap: 1,
+          },
+          minVelocity: 0.75,
+        },
       }
     );
   </script>
