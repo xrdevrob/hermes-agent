@@ -296,13 +296,18 @@ class ContextGraphEngine:
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>Hermes Context Graph</title>
-  <script src=\"https://unpkg.com/vis-network@9.1.9/dist/vis-network.min.js\"></script>
+  <script src=\"https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js\"></script>
+  <script src=\"https://unpkg.com/layout-base@2.0.1/layout-base.js\"></script>
+  <script src=\"https://unpkg.com/cose-base@2.2.0/cose-base.js\"></script>
+  <script src=\"https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js\"></script>
   <style>
     body { margin: 0; font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b1020; color: #f4f7ff; }
-    #top { padding: 12px 16px; border-bottom: 1px solid #2a3150; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+    #top { padding: 12px 16px; border-bottom: 1px solid #2a3150; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     #graph { width: 100vw; height: calc(100vh - 68px); }
     .pill { background: #151d36; border: 1px solid #2a3150; border-radius: 999px; padding: 6px 10px; font-size: 12px; }
     .legend { display: flex; gap: 8px; align-items: center; }
+    #search { background: #0f1730; border: 1px solid #2a3150; color: #e8efff; border-radius: 8px; padding: 6px 8px; min-width: 170px; }
+    #btn-fit { background: #1d2a4d; color: #e9f0ff; border: 1px solid #30406f; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -312,6 +317,8 @@ class ContextGraphEngine:
     <span class=\"pill\">topics: <span id=\"topics\"></span></span>
     <span class=\"pill\">tools: <span id=\"tools\"></span></span>
     <span class=\"pill\">edges: <span id=\"edges\"></span></span>
+    <input id=\"search\" type=\"text\" placeholder=\"highlight node label...\" />
+    <button id=\"btn-fit\">Fit graph</button>
     <span class=\"legend\">session ● blue</span>
     <span class=\"legend\">topic ● purple</span>
     <span class=\"legend\">tool ● green</span>
@@ -327,79 +334,125 @@ class ContextGraphEngine:
     document.getElementById('tools').textContent = stats.tools || 0;
     document.getElementById('edges').textContent = stats.edges || 0;
 
-    const nodes = new vis.DataSet((payload.nodes || []).map(n => {
-      let color = '#5b8def';
-      if (n.type === 'topic') color = '#8b5cf6';
-      if (n.type === 'tool') color = '#22c55e';
+    const nodeColor = (type) => {
+      if (type === 'session') return '#5b8def';
+      if (type === 'topic') return '#8b5cf6';
+      if (type === 'tool') return '#22c55e';
+      return '#9ca3af';
+    };
 
+    const elements = [];
+    for (const n of (payload.nodes || [])) {
       const isBig = (n.size || 0) >= 20;
       const showLabel = n.type === 'session' || isBig;
-      const label = showLabel ? n.label : '';
-      const title = `<b>${n.label}</b><br/>type: ${n.type}<br/>` +
-        Object.entries(n)
-          .filter(([k]) => !['id', 'label', 'type', 'size'].includes(k))
-          .map(([k,v]) => `${k}: ${v}`)
-          .join('<br/>');
+      elements.push({
+        data: {
+          id: n.id,
+          label: showLabel ? n.label : '',
+          fullLabel: n.label,
+          type: n.type,
+          size: n.size || 10,
+          color: nodeColor(n.type),
+        }
+      });
+    }
 
-      return {
-        id: n.id,
-        label,
-        value: n.size || 10,
-        title,
-        color: { background: color, border: '#dbe4ff' },
-        font: { color: '#f8fbff', size: 12, strokeWidth: 0 },
-      };
-    }));
+    for (const e of (payload.edges || [])) {
+      elements.push({
+        data: {
+          id: `${e.from}->${e.to}:${e.type}`,
+          source: e.from,
+          target: e.to,
+          weight: e.weight || 1,
+          rel: e.type || 'related'
+        }
+      });
+    }
 
-    const edges = new vis.DataSet((payload.edges || []).map(e => ({
-      from: e.from,
-      to: e.to,
-      value: e.weight || 1,
-      color: e.type === 'related' ? '#7b86b1' : '#55608f',
-      smooth: e.type === 'related',
-      title: `${e.type} (w=${e.weight || 1})`
-    })));
-
-    new vis.Network(
-      document.getElementById('graph'),
-      { nodes, edges },
-      {
-        layout: { randomSeed: 7, improvedLayout: true },
-        interaction: {
-          hover: true,
-          navigationButtons: true,
-          keyboard: true,
-          tooltipDelay: 120,
-          hideEdgesOnDrag: true,
+    const cy = cytoscape({
+      container: document.getElementById('graph'),
+      elements,
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'background-color': 'data(color)',
+            'border-color': '#dbe4ff',
+            'border-width': 1,
+            'width': 'mapData(size, 8, 34, 10, 34)',
+            'height': 'mapData(size, 8, 34, 10, 34)',
+            'label': 'data(label)',
+            'color': '#f5f8ff',
+            'font-size': 11,
+            'text-wrap': 'none',
+            'text-max-width': 120,
+            'text-outline-width': 2,
+            'text-outline-color': '#0b1020',
+            'text-margin-y': -12,
+          }
         },
-        nodes: {
-          shape: 'dot',
-          scaling: { min: 8, max: 34 },
-          margin: 8,
+        {
+          selector: 'edge',
+          style: {
+            'line-color': '#6070a5',
+            'opacity': 0.38,
+            'width': 'mapData(weight, 1, 8, 1, 4)',
+            'curve-style': 'bezier'
+          }
         },
-        edges: {
-          width: 1,
-          selectionWidth: 2,
-          scaling: { min: 1, max: 5 },
-          smooth: { enabled: true, type: 'dynamic' },
-          opacity: 0.65,
+        {
+          selector: 'node:selected',
+          style: {
+            'border-width': 3,
+            'border-color': '#ffffff',
+            'z-index': 999
+          }
         },
-        physics: {
-          enabled: true,
-          solver: 'forceAtlas2Based',
-          stabilization: { enabled: true, iterations: 1400, fit: true },
-          forceAtlas2Based: {
-            gravitationalConstant: -85,
-            centralGravity: 0.018,
-            springLength: 145,
-            springConstant: 0.055,
-            damping: 0.52,
-            avoidOverlap: 1,
-          },
-          minVelocity: 0.75,
+        {
+          selector: '.faded',
+          style: {
+            'opacity': 0.12
+          }
         },
+        {
+          selector: '.active',
+          style: {
+            'opacity': 1,
+            'line-color': '#93a4df',
+            'background-color': '#ffd166',
+            'color': '#fff'
+          }
+        }
+      ],
+      layout: {
+        name: 'fcose',
+        quality: 'proof',
+        randomize: true,
+        animate: false,
+        fit: true,
+        padding: 40,
+        nodeRepulsion: 8000,
+        idealEdgeLength: 140,
+        edgeElasticity: 0.3,
+        gravity: 0.25,
+        numIter: 2500,
+        tile: true,
+        packComponents: true,
       }
-    );
+    });
+
+    document.getElementById('btn-fit').addEventListener('click', () => cy.fit(undefined, 40));
+
+    const searchEl = document.getElementById('search');
+    searchEl.addEventListener('input', () => {
+      const q = searchEl.value.trim().toLowerCase();
+      cy.elements().removeClass('active').removeClass('faded');
+      if (!q) return;
+      const matches = cy.nodes().filter(n => (n.data('fullLabel') || '').toLowerCase().includes(q));
+      const keep = matches.union(matches.connectedEdges()).union(matches.connectedEdges().connectedNodes());
+      cy.elements().difference(keep).addClass('faded');
+      keep.addClass('active');
+    });
   </script>
 </body>
 </html>

@@ -62,7 +62,7 @@ def test_export_html_writes_interactive_file(tmp_path):
 
         assert path.exists()
         html = path.read_text(encoding="utf-8")
-        assert "vis-network" in html
+        assert "cytoscape" in html
         assert "payload" in html
         assert "session:s1" in html
     finally:
