@@ -126,10 +126,11 @@ class ContextGraphEngine:
         for tool_name, calls in session_tool_totals.most_common(50):
             nodes.append({
                 "id": f"tool:{tool_name}",
-                "label": tool_name,
+                "label": self._humanize_tool_name(tool_name),
                 "type": "tool",
                 "size": min(14 + calls, 28),
                 "calls": calls,
+                "tool_name": tool_name,
             })
 
         node_ids = {n["id"] for n in nodes}
@@ -249,6 +250,25 @@ class ContextGraphEngine:
         return f"{source}:{short_id}"
 
     @staticmethod
+    def _humanize_tool_name(name: str) -> str:
+        if not name:
+            return name
+        pretty = {
+            "patch": "File Edit (patch)",
+            "read_file": "Read File",
+            "search_files": "Search Files",
+            "write_file": "Write File",
+            "terminal": "Shell Command",
+            "browser_navigate": "Browser Navigate",
+            "browser_snapshot": "Browser Snapshot",
+            "browser_click": "Browser Click",
+            "session_search": "Session Recall",
+        }
+        if name in pretty:
+            return pretty[name]
+        return name.replace("_", " ").strip().title()
+
+    @staticmethod
     def _extract_tool_counts(messages: list[dict[str, Any]]) -> Counter[str]:
         counts: Counter[str] = Counter()
         for m in messages:
@@ -303,9 +323,11 @@ class ContextGraphEngine:
   <style>
     body { margin: 0; font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b1020; color: #f4f7ff; }
     #top { padding: 12px 16px; border-bottom: 1px solid #2a3150; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    #graph { width: 100vw; height: calc(100vh - 68px); }
+    #graph { width: calc(100vw - 300px); height: calc(100vh - 68px); display: inline-block; }
+    #side { width: 300px; height: calc(100vh - 68px); display: inline-block; vertical-align: top; background:#0e152a; border-left:1px solid #2a3150; box-sizing:border-box; padding:12px; overflow:auto; }
     .pill { background: #151d36; border: 1px solid #2a3150; border-radius: 999px; padding: 6px 10px; font-size: 12px; }
     .legend { display: flex; gap: 8px; align-items: center; }
+    .hint { color:#9fb0d9; font-size:11px; }
     #search { background: #0f1730; border: 1px solid #2a3150; color: #e8efff; border-radius: 8px; padding: 6px 8px; min-width: 170px; }
     #btn-fit { background: #1d2a4d; color: #e9f0ff; border: 1px solid #30406f; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
   </style>
@@ -319,11 +341,13 @@ class ContextGraphEngine:
     <span class=\"pill\">edges: <span id=\"edges\"></span></span>
     <input id=\"search\" type=\"text\" placeholder=\"highlight node label...\" />
     <button id=\"btn-fit\">Fit graph</button>
+    <label class=\"hint\"><input id=\"labels-all\" type=\"checkbox\" /> show more labels</label>
     <span class=\"legend\">session ● blue</span>
     <span class=\"legend\">topic ● purple</span>
     <span class=\"legend\">tool ● green</span>
+    <span class=\"hint\">Node size = frequency / importance</span>
   </div>
-  <div id=\"graph\"></div>
+  <div id=\"graph\"></div><div id=\"side\"><h3 style=\"margin-top:0\">Node details</h3><div id=\"details\" class=\"hint\">Click a node to inspect it.</div></div>
 
   <script>
     const payload = __PAYLOAD_JSON__;
@@ -343,16 +367,18 @@ class ContextGraphEngine:
 
     const elements = [];
     for (const n of (payload.nodes || [])) {
-      const isBig = (n.size || 0) >= 20;
-      const showLabel = n.type === 'session' || isBig;
+      const isBig = (n.size || 0) >= 18;
+      const showLabel = n.type === 'session' || n.type === 'tool' || isBig;
       elements.push({
         data: {
           id: n.id,
           label: showLabel ? n.label : '',
+          defaultLabel: showLabel ? n.label : '',
           fullLabel: n.label,
           type: n.type,
           size: n.size || 10,
           color: nodeColor(n.type),
+          raw: JSON.stringify(n),
         }
       });
     }
@@ -452,6 +478,29 @@ class ContextGraphEngine:
       const keep = matches.union(matches.connectedEdges()).union(matches.connectedEdges().connectedNodes());
       cy.elements().difference(keep).addClass('faded');
       keep.addClass('active');
+    });
+
+    const labelsAll = document.getElementById('labels-all');
+    labelsAll.addEventListener('change', () => {
+      const showAll = labelsAll.checked;
+      cy.nodes().forEach(n => {
+        n.data('label', showAll ? (n.data('fullLabel') || '') : (n.data('defaultLabel') || ''));
+      });
+    });
+
+    const details = document.getElementById('details');
+    cy.on('tap', 'node', (evt) => {
+      const n = evt.target;
+      let raw = {};
+      try { raw = JSON.parse(n.data('raw') || '{}'); } catch (_) { raw = {}; }
+      const neighbors = n.connectedEdges().connectedNodes().length - 1;
+      const edgeCount = n.connectedEdges().length;
+      details.innerHTML = `
+        <div><strong>${n.data('fullLabel') || n.id()}</strong></div>
+        <div class='hint'>type: ${n.data('type')} · size: ${n.data('size')} · edges: ${edgeCount} · neighbors: ${neighbors}</div>
+        <hr style='border-color:#2a3150;border-width:1px 0 0 0;margin:8px 0'/>
+        <pre style='white-space:pre-wrap;color:#d6e0ff;font-size:11px;line-height:1.35'>${JSON.stringify(raw, null, 2)}</pre>
+      `;
     });
   </script>
 </body>
